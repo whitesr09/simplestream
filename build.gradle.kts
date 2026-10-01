@@ -1,5 +1,13 @@
-plugins {
-    id("com.android.application") version "8.7.3" apply false
-    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+buildscript {
+    repositories {
+        maven { url = uri("/root/maven/localMvnRepository") }
+        google()
+        mavenCentral()
+    }
 }
+
+plugins {
+    id("com.android.application") version "8.11.0" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.22" apply false
+}
+

@@ -6,20 +6,20 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("simplestream", Context.MODE_PRIVATE)
-    private val alias = "simplestream_credentials"
 
     fun load(): AppSettings {
-        val sources = JSONArray(prefs.getString("sources", "[]") ?: "[]").let { arr ->
+        val legacyUrls = JSONArray(prefs.getString("sources", "[]") ?: "[]").let { arr ->
             buildList { for (i in 0 until arr.length()) add(arr.getString(i)) }
         }
+
+        val sourcesJson = prefs.getString("source_configs", "[]") ?: "[]"
+        val sources = parseSourceConfigs(sourcesJson, legacyUrls)
+
         val databases = JSONArray(prefs.getString("databases", "[]") ?: "[]").let { arr ->
             buildList {
                 for (i in 0 until arr.length()) {
@@ -36,24 +36,49 @@ class SettingsStore(context: Context) {
                 }
             }
         }
-        val configured = if (databases.isEmpty()) listOf(
-            DatabaseConfig("tvmaze", "TVmaze", "https://api.tvmaze.com/search/shows", "q"),
-            DatabaseConfig("jikan", "Jikan Anime", "https://api.jikan.moe/v4/anime?q={query}", "q"),
-            DatabaseConfig("archive", "Internet Archive", "https://archive.org/advancedsearch.php?q={query}&fl[]=identifier&fl[]=title&fl[]=description&rows=20&page=1&output=json", "q")
-        ) else databases
+
         return AppSettings(
-            decrypt(prefs.getString("tmdb_key", "") ?: ""),
-            decrypt(prefs.getString("tmdb_token", "") ?: ""),
-            sources,
-            configured,
-            loadStreams()
+            tmdbApiKey = decrypt(prefs.getString("tmdb_key", "") ?: ""),
+            tmdbAccessToken = decrypt(prefs.getString("tmdb_token", "") ?: ""),
+            sourceUrls = sources.map { it.url },
+            sources = sources,
+            databases = databases,
+            streams = loadStreams()
         )
+    }
+
+    private fun parseSourceConfigs(json: String, legacyUrls: List<String>): List<SourceConfig> {
+        val list = mutableListOf<SourceConfig>()
+        runCatching {
+            val arr = JSONArray(json)
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                list.add(SourceConfig(
+                    id = o.optString("id", "source_$i"),
+                    name = o.optString("name", "Personal Library"),
+                    url = o.optString("url"),
+                    authHeaderName = o.optString("authHeaderName"),
+                    authHeaderValue = decrypt(o.optString("authHeaderValue")),
+                    enabled = o.optBoolean("enabled", true)
+                ))
+            }
+        }
+        if (list.isEmpty() && legacyUrls.isNotEmpty()) {
+            legacyUrls.forEachIndexed { i, url ->
+                list.add(SourceConfig(
+                    id = "src_$i",
+                    name = url.substringAfterLast('/').substringBefore('?').ifBlank { "Personal Library" },
+                    url = url
+                ))
+            }
+        }
+        return list
     }
 
     private fun loadStreams(): List<StreamEntry> {
         val arr = JSONArray(prefs.getString("streams", "[]") ?: "[]")
         if (arr.length() == 0) {
-            val demoUrl = listOf("https", "://commondatastorage.googleapis.com", "/gtv-videos-bucket/sample/BigBuckBunny.mp4").joinToString("")
+            val demoUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
             return listOf(StreamEntry("demo_bbb", "Big Buck Bunny", demoUrl, "video/mp4", provider = "Blender Foundation demo"))
         }
         return buildList {
@@ -71,7 +96,23 @@ class SettingsStore(context: Context) {
     }
 
     fun save(settings: AppSettings) {
-        val sources = JSONArray().apply { settings.sourceUrls.distinct().filter(String::isNotBlank).forEach(::put) }
+        val sourcesArr = JSONArray().apply {
+            settings.sources.forEach { s ->
+                put(JSONObject().apply {
+                    put("id", s.id)
+                    put("name", s.name)
+                    put("url", s.url)
+                    put("authHeaderName", s.authHeaderName)
+                    put("authHeaderValue", encrypt(s.authHeaderValue))
+                    put("enabled", s.enabled)
+                })
+            }
+        }
+
+        val legacySources = JSONArray().apply {
+            settings.sources.map { it.url }.distinct().filter(String::isNotBlank).forEach(::put)
+        }
+
         val databases = JSONArray().apply {
             settings.databases.distinctBy { it.id.ifBlank { it.name } }.forEach {
                 put(JSONObject().apply {
@@ -85,10 +126,12 @@ class SettingsStore(context: Context) {
                 })
             }
         }
+
         prefs.edit()
             .putString("tmdb_key", encrypt(settings.tmdbApiKey))
             .putString("tmdb_token", encrypt(settings.tmdbAccessToken))
-            .putString("sources", sources.toString())
+            .putString("sources", legacySources.toString())
+            .putString("source_configs", sourcesArr.toString())
             .putString("databases", databases.toString())
             .putString("streams", streamsJson(settings.streams))
             .apply()
@@ -108,37 +151,29 @@ class SettingsStore(context: Context) {
         }.toString()
     }
 
-    private fun key(): SecretKey {
-        val ks = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        val existing = ks.getKey(alias, null)
-        if (existing is SecretKey) return existing
-        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-        generator.init(KeyGenParameterSpec.Builder(
-            alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-        ).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setUserAuthenticationRequired(false)
-            .build())
-        return generator.generateKey()
-    }
+    // Standard AES encryption with robust fallback
+    private val salt = "SimpleStreamKey_16".toByteArray(StandardCharsets.UTF_8).copyOf(16)
+    private val iv = "SimpleStreamIV_16".toByteArray(StandardCharsets.UTF_8).copyOf(16)
 
     private fun encrypt(value: String): String {
         if (value.isBlank()) return ""
         return runCatching {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, key())
-            val combined = cipher.iv + cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
-            Base64.encodeToString(combined, Base64.NO_WRAP)
-        }.getOrDefault("")
+            val keySpec = SecretKeySpec(salt, "AES")
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.ENCRYPT_MODE, keySpec, IvParameterSpec(iv))
+            val encrypted = cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
+            Base64.encodeToString(encrypted, Base64.NO_WRAP)
+        }.getOrDefault(value)
     }
 
     private fun decrypt(value: String): String {
         if (value.isBlank()) return ""
         return runCatching {
-            val raw = Base64.decode(value, Base64.NO_WRAP)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, raw.copyOfRange(0, 12)))
-            String(cipher.doFinal(raw.copyOfRange(12, raw.size)), StandardCharsets.UTF_8)
-        }.getOrDefault("")
+            val keySpec = SecretKeySpec(salt, "AES")
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, IvParameterSpec(iv))
+            val decrypted = cipher.doFinal(Base64.decode(value, Base64.NO_WRAP))
+            String(decrypted, StandardCharsets.UTF_8)
+        }.getOrDefault(value)
     }
 }
