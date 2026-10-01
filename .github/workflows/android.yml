@@ -42,3 +42,5 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+# Rebuild after refreshing the bundled demo stream URLs.
