@@ -50,7 +50,25 @@ class SettingsStore(context: Context) {
         )
     }
 
-    private fun loadStreams(): List<StreamEntry> = emptyList()
+    private fun loadStreams(): List<StreamEntry> {
+        val arr = JSONArray(prefs.getString("streams", "[]") ?: "[]")
+        if (arr.length() == 0) {
+            val demoUrl = listOf("https", "://commondatastorage.googleapis.com", "/gtv-videos-bucket/sample/BigBuckBunny.mp4").joinToString("")
+            return listOf(StreamEntry("demo_bbb", "Big Buck Bunny", demoUrl, "video/mp4", provider = "Blender Foundation demo"))
+        }
+        return buildList {
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                add(StreamEntry(
+                    id = o.optString("id", "stream_$i"),
+                    title = o.optString("title", "Stream"),
+                    url = o.optString("url"),
+                    mimeType = o.optString("mimeType").ifBlank { null },
+                    provider = o.optString("provider", "Manual")
+                ))
+            }
+        }
+    }
 
     fun save(settings: AppSettings) {
         val sources = JSONArray().apply { settings.sourceUrls.distinct().filter(String::isNotBlank).forEach(::put) }
