@@ -123,7 +123,7 @@ class SimpleStreamViewModel(app: Application) : AndroidViewModel(app) {
                     type = o.optString("type", o.optString("media_type", "Video")),
                     year = o.optString("year").ifBlank { o.optString("release_date").take(4).ifBlank { null } },
                     poster = o.optString("poster").ifBlank { o.optString("poster_url").ifBlank {
-                        o.optJSONObject("image")?.optString("original").ifBlank { o.optJSONObject("image")?.optString("medium") }
+                        o.optJSONObject("image")?.let { image -> image.optString("original").ifBlank { image.optString("medium") } }.orEmpty()
                     } },
                     streamUrl = o.optString("streamUrl").ifBlank { o.optString("url").ifBlank { null } },
                     description = o.optString("description").ifBlank { o.optString("overview").ifBlank { null } },
