@@ -9,7 +9,13 @@ import java.net.URLEncoder
 
 class TmdbRepository {
     suspend fun home(settings: AppSettings): List<HomeSection> {
-        return listOf(HomeSection("Popular Movies", getResults("/movie/popular", settings).take(20)))
+        return listOf(
+            HomeSection("Trending", getResults("/trending/all/day", settings).take(20)),
+            HomeSection("Popular Movies", getResults("/movie/popular", settings).take(20)),
+            HomeSection("Now Playing", getResults("/movie/now_playing", settings).take(20)),
+            HomeSection("Popular TV", getResults("/tv/popular", settings).take(20)),
+            HomeSection("Top Rated TV", getResults("/tv/top_rated", settings).take(20))
+        ).filter { it.items.isNotEmpty() }
     }
     private val client = OkHttpClient()
 
