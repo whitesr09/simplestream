@@ -21,6 +21,7 @@ data class UiState(
     val settings: AppSettings = AppSettings(),
     val query: String = "",
     val results: List<MediaItem> = emptyList(),
+    val homeSections: List<HomeSection> = emptyList(),
     val sources: List<SourceManifest> = emptyList(),
     val loading: Boolean = false,
     val message: String? = null
@@ -34,9 +35,28 @@ class SimpleStreamViewModel(app: Application) : AndroidViewModel(app) {
     private val stateFlow = MutableStateFlow(UiState(settings = store.load()))
     val state: StateFlow<UiState> = stateFlow
 
-    init { refreshSources() }
+    init {
+        refreshSources()
+        loadHome()
+    }
 
     fun setQuery(value: String) { stateFlow.value = stateFlow.value.copy(query = value) }
+
+    fun loadHome() {
+        viewModelScope.launch {
+            val settings = stateFlow.value.settings
+            if (settings.tmdbApiKey.isBlank() && settings.tmdbAccessToken.isBlank()) {
+                stateFlow.value = stateFlow.value.copy(
+                    homeSections = emptyList(),
+                    message = "Add a TMDB API key or Read Access Token in Settings."
+                )
+                return@launch
+            }
+            stateFlow.value = stateFlow.value.copy(loading = true, message = null)
+            val sections = tmdb.home(settings)
+            stateFlow.value = stateFlow.value.copy(homeSections = sections, loading = false)
+        }
+    }
 
     fun search() {
         val query = stateFlow.value.query.trim()
@@ -90,6 +110,7 @@ class SimpleStreamViewModel(app: Application) : AndroidViewModel(app) {
             is JSONObject -> root.optJSONArray("results")
                 ?: root.optJSONArray("items")
                 ?: root.optJSONArray("data")
+                ?: root.optJSONObject("response")?.optJSONArray("docs")
                 ?: JSONArray()
             else -> JSONArray()
         }
@@ -101,7 +122,9 @@ class SimpleStreamViewModel(app: Application) : AndroidViewModel(app) {
                     title = o.optString("title").ifBlank { o.optString("name", "Untitled") },
                     type = o.optString("type", o.optString("media_type", "Video")),
                     year = o.optString("year").ifBlank { o.optString("release_date").take(4).ifBlank { null } },
-                    poster = o.optString("poster").ifBlank { o.optString("poster_url").ifBlank {\n                        o.optJSONObject("image")?.optString("original").ifBlank { o.optJSONObject("image")?.optString("medium") }\n                    } },
+                    poster = o.optString("poster").ifBlank { o.optString("poster_url").ifBlank {
+                        o.optJSONObject("image")?.optString("original").ifBlank { o.optJSONObject("image")?.optString("medium") }
+                    } },
                     streamUrl = o.optString("streamUrl").ifBlank { o.optString("url").ifBlank { null } },
                     description = o.optString("description").ifBlank { o.optString("overview").ifBlank { null } },
                     provider = provider
@@ -111,19 +134,31 @@ class SimpleStreamViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun saveSettings(apiKey: String, token: String, sourceText: String, databases: List<DatabaseConfig> = stateFlow.value.settings.databases) {
+        val old = stateFlow.value.settings
         val settings = AppSettings(
-            apiKey.trim(), token.trim(),
+            apiKey.trim(),
+            token.trim(),
             sourceText.lines().map(String::trim).filter(String::isNotBlank).distinct(),
-            databases
+            databases,
+            old.streams
         )
         store.save(settings)
         stateFlow.value = stateFlow.value.copy(settings = settings, message = "Settings saved")
         refreshSources()
+        loadHome()
     }
 
     fun saveDatabases(databases: List<DatabaseConfig>) {
         val s = stateFlow.value.settings
         saveSettings(s.tmdbApiKey, s.tmdbAccessToken, s.sourceUrls.joinToString("\n"), databases)
+    }
+
+    fun addStream(entry: StreamEntry) {
+        val s = stateFlow.value.settings
+        val updated = (s.streams.filterNot { it.id == entry.id } + entry).distinctBy { it.id }
+        val next = s.copy(streams = updated)
+        store.save(next)
+        stateFlow.value = stateFlow.value.copy(settings = next, message = "Stream added")
     }
 
     fun refreshSources() {
@@ -140,6 +175,20 @@ class SimpleStreamViewModel(app: Application) : AndroidViewModel(app) {
         getApplication<Application>().startActivity(Intent(getApplication(), PlayerActivity::class.java).apply {
             putExtra("url", url)
             putExtra("title", item.title)
+            putExtra("mimeType", item.mimeType)
+            putExtra("drmScheme", item.drmScheme)
+            putExtra("drmLicenseUrl", item.drmLicenseUrl)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+
+    fun play(entry: StreamEntry) {
+        getApplication<Application>().startActivity(Intent(getApplication(), PlayerActivity::class.java).apply {
+            putExtra("url", entry.url)
+            putExtra("title", entry.title)
+            putExtra("mimeType", entry.mimeType)
+            putExtra("drmScheme", entry.drmScheme)
+            putExtra("drmLicenseUrl", entry.drmLicenseUrl)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         })
     }
