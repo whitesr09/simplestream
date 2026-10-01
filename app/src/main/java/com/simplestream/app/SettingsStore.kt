@@ -90,7 +90,22 @@ class SettingsStore(context: Context) {
             .putString("tmdb_token", encrypt(settings.tmdbAccessToken))
             .putString("sources", sources.toString())
             .putString("databases", databases.toString())
+            .putString("streams", streamsJson(settings.streams))
             .apply()
+    }
+
+    private fun streamsJson(streams: List<StreamEntry>): String {
+        return JSONArray().apply {
+            streams.forEach {
+                put(JSONObject().apply {
+                    put("id", it.id)
+                    put("title", it.title)
+                    put("url", it.url)
+                    put("mimeType", it.mimeType ?: "")
+                    put("provider", it.provider)
+                })
+            }
+        }.toString()
     }
 
     private fun key(): SecretKey {
