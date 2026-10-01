@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -32,6 +33,7 @@ fun SimpleStreamApp(vm: SimpleStreamViewModel = viewModel()) {
     var tab by remember { mutableIntStateOf(0) }
     var showAddSource by remember { mutableStateOf(false) }
     var showAddDatabase by remember { mutableStateOf(false) }
+    var showAddStream by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val dark = isSystemInDarkTheme()
     val scheme = if (android.os.Build.VERSION.SDK_INT >= 31) {
@@ -57,7 +59,7 @@ fun SimpleStreamApp(vm: SimpleStreamViewModel = viewModel()) {
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when (tab) {
                     0 -> HomeScreen(state, vm)
-                    1 -> SourcesScreen(state) { showAddSource = true }
+                    1 -> SourcesScreen(state, vm, { showAddSource = true }, { showAddStream = true })
                     2 -> SettingsScreen(state, vm) { showAddDatabase = true }
                 }
             }
@@ -79,45 +81,105 @@ fun SimpleStreamApp(vm: SimpleStreamViewModel = viewModel()) {
             showAddDatabase = false
         }
     )
+    if (showAddStream) AddStreamDialog(
+        onDismiss = { showAddStream = false },
+        onSave = { entry ->
+            vm.addStream(entry)
+            showAddStream = false
+        }
+    )
 }
 
 @Composable
 private fun HomeScreen(state: UiState, vm: SimpleStreamViewModel) {
     var directUrl by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        OutlinedTextField(
-            value = state.query,
-            onValueChange = vm::setQuery,
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Search movies, TV, anime and video") },
-            leadingIcon = { Icon(Icons.Default.Search, null) },
-            trailingIcon = { IconButton(onClick = vm::search) { Icon(Icons.Default.Search, null) } },
-            singleLine = true
-        )
-        Spacer(Modifier.height(10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
+    ) {
+        item {
             OutlinedTextField(
-                value = directUrl,
-                onValueChange = { directUrl = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Paste MP4 / M3U8 / MPD / direct stream") },
+                value = state.query,
+                onValueChange = vm::setQuery,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search movies, TV, anime and video") },
+                leadingIcon = { Icon(Icons.Default.Search, null) },
+                trailingIcon = { IconButton(onClick = vm::search) { Icon(Icons.Default.Search, null) } },
                 singleLine = true
             )
-            Spacer(Modifier.width(8.dp))
-            FilledIconButton(onClick = {
-                if (directUrl.startsWith("http", true)) vm.play(MediaItem("direct", "Direct stream", streamUrl = directUrl))
-            }) { Icon(Icons.Default.PlayArrow, "Play") }
         }
-        Spacer(Modifier.height(14.dp))
-        if (state.results.isEmpty()) {
-            Text("TMDB metadata plus your added databases and source manifests appear here.", style = MaterialTheme.typography.bodyMedium)
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = directUrl,
+                    onValueChange = { directUrl = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Direct MP4 / M3U8 / MPD") },
+                    singleLine = true
+                )
+                Spacer(Modifier.width(8.dp))
+                FilledIconButton(onClick = {
+                    if (directUrl.startsWith("http", true)) {
+                        vm.play(MediaItem("direct", "Direct stream", streamUrl = directUrl))
+                    }
+                }) { Icon(Icons.Default.PlayArrow, "Play") }
+            }
         }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(bottom = 20.dp)
-        ) {
-            items(state.results, key = { it.id }) { MediaCard(it, vm) }
+
+        if (!state.message.isNullOrBlank()) {
+            item { Text(state.message, style = MaterialTheme.typography.bodyMedium) }
+        }
+
+        if (state.results.isNotEmpty()) {
+            item { Text("Search results", style = MaterialTheme.typography.headlineSmall) }
+            items(state.results, key = { "search_" + it.id }) { MediaCard(it, vm) }
+        }
+
+        if (state.results.isEmpty() && state.homeSections.isNotEmpty()) {
+            state.homeSections.forEach { section ->
+                item {
+                    Text(section.title, style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(4.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(end = 16.dp)
+                    ) {
+                        items(section.items, key = { "home_" + section.title + "_" + it.id }) { item ->
+                            PosterCard(item, vm)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (state.results.isEmpty() && state.homeSections.isEmpty()) {
+            item {
+                Text(
+                    "Configure TMDB in Settings to populate the home catalogue. TMDB supplies metadata; a playable stream must come from a source you are authorized to use.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+
+        if (state.settings.streams.isNotEmpty()) {
+            item { Text("Added streams", style = MaterialTheme.typography.headlineSmall) }
+            items(state.settings.streams, key = { "stream_" + it.id }) { stream ->
+                StreamCard(stream, vm)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PosterCard(item: MediaItem, vm: SimpleStreamViewModel) {
+    ElevatedCard(Modifier.width(150.dp), onClick = { if (item.streamUrl != null) vm.play(item) }) {
+        Column {
+            AsyncImage(model = item.poster, contentDescription = null, modifier = Modifier.fillMaxWidth().height(210.dp))
+            Column(Modifier.padding(10.dp)) {
+                Text(item.title, maxLines = 2, style = MaterialTheme.typography.titleSmall)
+                Text(listOfNotNull(item.type, item.year).joinToString(" • "), style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }
@@ -141,23 +203,48 @@ private fun MediaCard(item: MediaItem, vm: SimpleStreamViewModel) {
 }
 
 @Composable
-private fun SourcesScreen(state: UiState, onAdd: () -> Unit) {
+private fun StreamCard(entry: StreamEntry, vm: SimpleStreamViewModel) {
+    ListItem(
+        headlineContent = { Text(entry.title) },
+        supportingContent = { Text(listOfNotNull(entry.provider, entry.mimeType).joinToString(" • ")) },
+        trailingContent = {
+            IconButton(onClick = { vm.play(entry) }) {
+                Icon(Icons.Default.PlayArrow, "Play")
+            }
+        }
+    )
+}
+
+@Composable
+private fun SourcesScreen(
+    state: UiState,
+    vm: SimpleStreamViewModel,
+    onAddSource: () -> Unit,
+    onAddStream: () -> Unit
+) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Streaming sources", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-            FilledIconButton(onClick = onAdd) { Icon(Icons.Default.Add, "Add source") }
+            IconButton(onClick = onAddStream) { Icon(Icons.Default.VideoLibrary, "Add stream") }
+            FilledIconButton(onClick = onAddSource) { Icon(Icons.Default.Add, "Add source") }
         }
-        Text("Add JSON manifests from inside the APK. They load concurrently, and one failed source does not block the others.", style = MaterialTheme.typography.bodySmall)
+        Text("Add manifest URLs or individual direct media URLs. Direct playback supports Media3-compatible media; protected services require their licensed DRM configuration.", style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(12.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(state.sources) { source ->
-                ListItem(
-                    headlineContent = { Text(source.name) },
-                    supportingContent = {
-                        Text(source.error ?: (source.items.size.toString() + " items • " + source.url), maxLines = 2)
-                    },
-                    leadingContent = { Icon(if (source.error == null) Icons.Default.CheckCircle else Icons.Default.Warning, null) }
-                )
+
+        if (state.settings.streams.isNotEmpty()) {
+            Text("Direct streams", style = MaterialTheme.typography.titleLarge)
+            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                items(state.settings.streams, key = { it.id }) { StreamCard(it, vm) }
+            }
+        } else {
+            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(state.sources) { source ->
+                    ListItem(
+                        headlineContent = { Text(source.name) },
+                        supportingContent = { Text(source.error ?: (source.items.size.toString() + " items • " + source.url), maxLines = 2) },
+                        leadingContent = { Icon(if (source.error == null) Icons.Default.CheckCircle else Icons.Default.Warning, null) }
+                    )
+                }
             }
         }
     }
@@ -193,14 +280,14 @@ private fun SettingsScreen(state: UiState, vm: SimpleStreamViewModel, onAddDatab
         }
 
         Spacer(Modifier.height(14.dp))
-        Text("Streaming sources", style = MaterialTheme.typography.headlineSmall)
+        Text("Streaming manifests", style = MaterialTheme.typography.headlineSmall)
         OutlinedTextField(
             sources, { sources = it },
             Modifier.fillMaxWidth().height(130.dp),
-            label = { Text("Source manifest URLs, one per line") }
+            label = { Text("Manifest URLs, one per line") }
         )
         Spacer(Modifier.height(8.dp))
-        Text("Playback supports progressive media such as MP4, HLS (.m3u8), DASH (.mpd), and other Media3-compatible streams. Provider webpages, protected DRM services, and encrypted links need provider-specific resolver or DRM configuration.", style = MaterialTheme.typography.bodySmall)
+        Text("For a provider webpage or provider-specific service, add a dedicated adapter rather than trying to scrape or bypass access controls. For DRM, supply the provider's legitimate license configuration.", style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -212,6 +299,42 @@ private fun AddSourceDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
         title = { Text("Add streaming source") },
         text = { OutlinedTextField(url, { url = it }, label = { Text("HTTPS manifest URL") }, singleLine = true) },
         confirmButton = { TextButton(onClick = { if (url.startsWith("http", true)) onSave(url.trim()) }) { Text("Add") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun AddStreamDialog(onDismiss: () -> Unit, onSave: (StreamEntry) -> Unit) {
+    var title by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("") }
+    var mime by remember { mutableStateOf("") }
+    var provider by remember { mutableStateOf("Manual") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add direct stream") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(title, { title = it }, label = { Text("Title") }, singleLine = true)
+                OutlinedTextField(url, { url = it }, label = { Text("Media URL") }, singleLine = true)
+                OutlinedTextField(mime, { mime = it }, label = { Text("MIME type (optional)") }, singleLine = true, placeholder = { Text("video/mp4 or application/x-mpegURL") })
+                OutlinedTextField(provider, { provider = it }, label = { Text("Provider label") }, singleLine = true)
+                Text("Use this for media URLs you are authorized to access. HLS/DASH URLs can be entered even when their filename does not reveal the format, by supplying the MIME type.")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (title.isNotBlank() && url.startsWith("http", true)) {
+                    onSave(StreamEntry(
+                        id = title.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_'),
+                        title = title.trim(),
+                        url = url.trim(),
+                        mimeType = mime.trim().ifBlank { null },
+                        provider = provider.trim().ifBlank { "Manual" }
+                    ))
+                }
+            }) { Text("Add") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
@@ -256,7 +379,6 @@ private fun AddDatabaseDialog(onDismiss: () -> Unit, onSave: (DatabaseConfig) ->
                 }
             }) { Text("Add") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
