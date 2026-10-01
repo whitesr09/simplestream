@@ -19,6 +19,34 @@ class TmdbRepository {
     }
     private val client = OkHttpClient()
 
+    private suspend fun getResults(path: String, settings: AppSettings): List<MediaItem> = withContext(Dispatchers.IO) {
+        if (settings.tmdbApiKey.isBlank() && settings.tmdbAccessToken.isBlank()) return@withContext emptyList()
+        val url = "https://api.themoviedb.org/3" + path
+        val requestUrl = if (settings.tmdbAccessToken.isBlank()) url + (if (url.contains("?")) "&" else "?") + "api_key=" + URLEncoder.encode(settings.tmdbApiKey, "UTF-8") else url
+        val builder = Request.Builder().url(requestUrl)
+        if (settings.tmdbAccessToken.isNotBlank()) builder.header("Authorization", "Bearer " + settings.tmdbAccessToken)
+        client.newCall(builder.build()).execute().use { response ->
+            if (!response.isSuccessful) return@withContext emptyList()
+            val results = JSONObject(response.body?.string().orEmpty()).optJSONArray("results") ?: return@withContext emptyList()
+            buildList {
+                for (i in 0 until results.length()) {
+                    val o = results.optJSONObject(i) ?: continue
+                    val mediaType = o.optString("media_type").ifBlank { if (path.startsWith("/tv/")) "tv" else "movie" }
+                    val date = o.optString("release_date").ifBlank { o.optString("first_air_date") }
+                    add(MediaItem(
+                        id = o.optString("id", i.toString()),
+                        title = o.optString("title").ifBlank { o.optString("name", "Untitled") },
+                        type = if (mediaType == "tv") "TV" else "Movie",
+                        year = date.take(4).ifBlank { null },
+                        poster = o.optString("poster_path").takeIf { it.isNotBlank() }?.let { "https://image.tmdb.org/t/p/w500" + it },
+                        description = o.optString("overview").ifBlank { null },
+                        provider = "TMDB"
+                    ))
+                }
+            }
+        }
+    }
+
     suspend fun search(query: String, settings: AppSettings): List<MediaItem> = withContext(Dispatchers.IO) {
         if (query.isBlank() || settings.tmdbApiKey.isBlank()) return@withContext emptyList()
         val encoded = URLEncoder.encode(query, "UTF-8")
