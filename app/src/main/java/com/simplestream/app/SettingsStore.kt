@@ -36,6 +36,11 @@ class SettingsStore(context: Context) {
                 }
             }
         }
+        val configured = if (databases.isEmpty()) listOf(
+            DatabaseConfig("tvmaze", "TVmaze", "https://api.tvmaze.com/search/shows", "q"),
+            DatabaseConfig("jikan", "Jikan Anime", "https://api.jikan.moe/v4/anime?q={query}", "q"),
+            DatabaseConfig("archive", "Internet Archive", "https://archive.org/advancedsearch.php?q={query}&fl[]=identifier&fl[]=title&fl[]=description&rows=20&page=1&output=json", "q")
+        ) else databases
         return AppSettings(
             decrypt(prefs.getString("tmdb_key", "") ?: ""),
             decrypt(prefs.getString("tmdb_token", "") ?: ""),
