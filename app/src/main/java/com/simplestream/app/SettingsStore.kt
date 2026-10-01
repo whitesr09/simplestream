@@ -50,6 +50,8 @@ class SettingsStore(context: Context) {
         )
     }
 
+    private fun loadStreams(): List<StreamEntry> = emptyList()
+
     fun save(settings: AppSettings) {
         val sources = JSONArray().apply { settings.sourceUrls.distinct().filter(String::isNotBlank).forEach(::put) }
         val databases = JSONArray().apply {
