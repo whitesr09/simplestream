@@ -8,7 +8,9 @@ import org.json.JSONObject
 import java.net.URLEncoder
 
 class TmdbRepository {
-    suspend fun home(settings: AppSettings): List<HomeSection> = emptyList()
+    suspend fun home(settings: AppSettings): List<HomeSection> {
+        return listOf(HomeSection("Popular Movies", getResults("/movie/popular", settings).take(20)))
+    }
     private val client = OkHttpClient()
 
     suspend fun search(query: String, settings: AppSettings): List<MediaItem> = withContext(Dispatchers.IO) {
