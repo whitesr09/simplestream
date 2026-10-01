@@ -71,7 +71,7 @@ class SimpleStreamViewModel(app: Application) : AndroidViewModel(app) {
         val requestBuilder = Request.Builder().url(url)
         when (db.credentialMode) {
             CredentialMode.API_KEY_QUERY -> if (db.credential.isNotBlank()) {
-                requestBuilder.url(url + if (url.contains("?")) "&api_key=" else "?api_key=" + db.credential)
+                requestBuilder.url(url + if (url.contains("?")) "&api_key=" + db.credential else "?api_key=" + db.credential)
             }
             CredentialMode.API_KEY_HEADER -> if (db.credential.isNotBlank()) requestBuilder.header("X-API-Key", db.credential)
             CredentialMode.BEARER -> if (db.credential.isNotBlank()) requestBuilder.header("Authorization", "Bearer " + db.credential)
