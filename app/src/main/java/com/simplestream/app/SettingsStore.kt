@@ -45,7 +45,8 @@ class SettingsStore(context: Context) {
             decrypt(prefs.getString("tmdb_key", "") ?: ""),
             decrypt(prefs.getString("tmdb_token", "") ?: ""),
             sources,
-            databases
+            databases,
+            emptyList()
         )
     }
 
