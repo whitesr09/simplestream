@@ -27,6 +27,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SimpleStreamApp(vm: SimpleStreamViewModel = viewModel()) {
     val state by vm.state.collectAsState()
