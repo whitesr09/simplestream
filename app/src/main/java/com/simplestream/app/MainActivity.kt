@@ -70,7 +70,7 @@ fun SimpleStreamApp(vm: SimpleStreamViewModel = viewModel()) {
         onDismiss = { showAddSource = false },
         onSave = { url ->
             val s = state.settings
-            vm.saveSettings(s.tmdbApiKey, s.tmdbAccessToken, (s.sourceUrls + url).distinct())
+            vm.saveSettings(s.tmdbApiKey, s.tmdbAccessToken, (s.sourceUrls + url).distinct().joinToString("\n"))
             showAddSource = false
         }
     )
@@ -173,7 +173,7 @@ private fun HomeScreen(state: UiState, vm: SimpleStreamViewModel) {
 
 @Composable
 private fun PosterCard(item: MediaItem, vm: SimpleStreamViewModel) {
-    ElevatedCard(Modifier.width(150.dp), onClick = { if (item.streamUrl != null) vm.play(item) }) {
+    ElevatedCard(onClick = { if (item.streamUrl != null) vm.play(item) }, modifier = Modifier.width(150.dp)) {
         Column {
             AsyncImage(model = item.poster, contentDescription = null, modifier = Modifier.fillMaxWidth().height(210.dp))
             Column(Modifier.padding(10.dp)) {
